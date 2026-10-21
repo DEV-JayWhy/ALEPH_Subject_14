@@ -1,6 +1,6 @@
 export function escapeHtml(value='') { return String(value).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 export function canWrite(profile) { return profile?.role==='admin' && profile?.status==='approved'; }
-export function memberLabel(profile) { return ({pending:'가입 승인 대기',approved:profile?.role==='admin'?'관리자':'승인된 회원',rejected:'가입 신청 거절',expelled:'이용 권한 해제'})[profile?.status] || '방문자'; }
+export function memberLabel(profile) { return ({pending:'가입 승인 대기',approved:profile?.role==='admin'?'관리자':'승인된 회원',rejected:'가입 신청 거절',expelled:'블랙 회원'})[profile?.status] || '방문자'; }
 export function fileAllowed(file) { return ['image/png','image/jpeg','image/webp','image/gif'].includes(file.type) && file.size>0 && file.size<=5*1024*1024; }
 export function readableError(error) {
  if(error?.publicMessage)return error.publicMessage;
