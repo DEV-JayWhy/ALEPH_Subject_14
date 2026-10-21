@@ -1,0 +1,12 @@
+import {createClient} from '@supabase/supabase-js';
+import assert from 'node:assert/strict';
+const db=createClient('https://gvptgromcpetcyclpkds.supabase.co','sb_publishable_MlIR68TgHkAR58TGNXc0Og_PScv-qwg',{auth:{persistSession:false,autoRefreshToken:false}});
+const checks=[];
+const read=await db.from('posts').select('id,title,visibility').eq('is_published',true);
+assert.equal(read.error,null);assert.ok(read.data.every(p=>p.visibility==='public'));checks.push('Anonymous list request succeeds and returns public posts only');
+const profiles=await db.from('profiles').select('id,email,role,status');
+assert.ok(profiles.error);checks.push('Anonymous direct profile request denied');
+const write=await db.from('posts').insert({id:'90000000-0000-4000-8000-000000000001',author_id:'90000000-0000-4000-8000-000000000002',title:'MUST NOT BE CREATED',content_html:'denial check',visibility:'public'});
+assert.ok(write.error);checks.push('Anonymous direct post creation denied');
+const privateRpc=await db.rpc('is_admin');assert.ok(privateRpc.error);checks.push('Internal authorization function is not a public RPC');
+console.log(JSON.stringify({passed:checks.length,checks},null,2));
