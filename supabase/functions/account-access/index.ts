@@ -1,5 +1,6 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.118.0';
 import {normalizeUsername,validUsername,registrationIssue} from './account-rules.js';
+import {reapply} from './reapply.js';
 const url=Deno.env.get('SUPABASE_URL')!;
 const serviceKey=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const service=createClient(url,serviceKey,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -10,7 +11,7 @@ async function takeSlot(req:Request,action:string,username:string){
  const ip=req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||'unknown';
  const hash=async(text:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(serviceKey+':'+text)))).map(x=>x.toString(16).padStart(2,'0')).join('');
  const keys=[await hash(action+':ip:'+ip)];
- if(action==='login')keys.push(await hash(action+':username:'+username));
+ keys.push(await hash(action+':username:'+username));
  for(const key of keys){const{data,error}=await service.rpc('take_account_request_slot',{rate_key:key,max_requests:action==='register'?8:40,window_seconds:900});if(error)return false;if(!data)return false;}
  return true;
 }
@@ -30,16 +31,21 @@ Deno.serve(async(req:Request)=>{
   }
   if(!await takeSlot(req,action,username))return reply(429,{message:'시도가 너무 많습니다. 15분 후 다시 시도해 주세요.'});
   if(action==='register'){
-   const{data:existing,error:lookupError}=await service.from('profiles').select('id').eq('username',username).maybeSingle();
+   const{data:existing,error:lookupError}=await service.from('profiles').select('id,email,role,status').eq('username',username).maybeSingle();
    if(lookupError)return reply(503,{message:'가입 신청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'});
-   if(existing)return reply(409,{message:'이미 사용 중인 아이디입니다.'});
+   if(existing){
+    const auth=createClient(url,Deno.env.get('SUPABASE_ANON_KEY')!,{auth:{persistSession:false,autoRefreshToken:false}});
+    const result=await reapply({profile:existing,password,displayName:body.displayName,auth,service});
+    return reply(result.status,{message:result.message});
+   }
    // Internal Auth identifier only. No mailbox, confirmation email, or invitation is used.
    const{error}=await service.auth.admin.createUser({email:`${username}@members.aleph.invalid`,password,email_confirm:true,user_metadata:{username,display_name:body.displayName.trim()}});
    if(error){if(/registered|duplicate|exists/i.test(error.message))return reply(409,{message:'이미 사용 중인 아이디입니다.'});return reply(400,{message:'가입 신청을 처리하지 못했습니다. 아이디와 비밀번호 조건을 확인해 주세요.'});}
    return reply(201,{message:'가입 신청을 접수했습니다. 관리자 승인 전에는 공개 기록만 볼 수 있습니다.'});
   }
-  const{data:profile,error:profileError}=await service.from('profiles').select('id,email').eq('username',username).maybeSingle();
+  const{data:profile,error:profileError}=await service.from('profiles').select('id,email,status').eq('username',username).maybeSingle();
   if(profileError)return reply(503,{message:'로그인을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'});
+  if(profile&&['rejected','expelled'].includes(profile.status))return reply(401,{message:'아이디 또는 비밀번호가 올바르지 않거나 이용이 제한된 계정입니다.'});
   // Use Supabase Auth to verify the password; never return an account's real email address.
   const auth=createClient(url,Deno.env.get('SUPABASE_ANON_KEY')!,{auth:{persistSession:false,autoRefreshToken:false}});
   const{data,error}=await auth.auth.signInWithPassword({email:profile?.email||'no-such-user@members.aleph.invalid',password});
