@@ -43,3 +43,11 @@ npm run dev
 - db/username-auth.sql은 기존 계정·글을 보존하는 아이디 전환 스키마 변경이다.
 - supabase/functions/account-access 소스와 src/account-rules.js의 검증 규칙을 함께 배포한다.
 - SMTP와 이메일 비밀번호 복구는 사용하지 않는다. 새 가입·로그인 실제 성공 확인은 검증 문서에 별도로 기록한다.
+
+## 블로그 수정·카테고리와 이전/다음 글
+
+- 관리자 전용 블로그 수정 → 카테고리 관리. 이름·대표 이미지 변경과 삭제(글은 미분류 유지).
+- 기본 이미지 12종과 직접 등록한 이미지 선택. 여러 이미지 등록은 최대 10개·각 5MB. 카테고리 이미지는 공개 블로그 설정용이며 비공개 게시물 이미지와 별도 bucket을 사용한다.
+- db/categories-and-neighbors.sql: categories/category_images RLS, 기존 글 FK 보존, SECURITY INVOKER 이전·다음 글 RPC.
+- 이전 글=작성일상 더 오래된 글, 다음 글=더 최신 글. 현재 방문자의 RLS로 허용된 발행 글에서만 찾는다.
+- tests/categories-neighbors.integration.mjs는 익명 읽기·쓰기 차단 및 이웃 글 비공개 제목 비노출 검증을 수행한다. 현재 운영 글이 1개뿐인 검증 한계는 2차 검증 기록에 명시한다.
