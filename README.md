@@ -51,3 +51,13 @@ npm run dev
 - db/categories-and-neighbors.sql: categories/category_images RLS, 기존 글 FK 보존, SECURITY INVOKER 이전·다음 글 RPC.
 - 이전 글=작성일상 더 오래된 글, 다음 글=더 최신 글. 현재 방문자의 RLS로 허용된 발행 글에서만 찾는다.
 - tests/categories-neighbors.integration.mjs는 익명 읽기·쓰기 차단 및 이웃 글 비공개 제목 비노출 검증을 수행한다. 현재 운영 글이 1개뿐인 검증 한계는 2차 검증 기록에 명시한다.
+
+## 관리자 임시저장
+
+- 새 글 또는 임시저장 편집 화면에서 **임시 저장**을 누르면 관리자 전용 **임시저장** 목록에 보관한다. 제목·본문이 미완성이어도 저장할 수 있다.
+- 저장 후 같은 화면에서 계속 작성하거나 목록의 **이어 작성**으로 다시 연다.
+- **기록 저장**은 현재 내용과 공개 범위로 같은 글을 발행한다. 임시저장 목록에서 빠지며 중복 글은 생성하지 않는다.
+- 공개를 선택해 두어도 발행 전까지 제목·본문·이미지는 관리자만 접근한다. 미분류와는 별개다.
+- 이미 발행된 글의 수정은 기존 수정 내용 저장을 이용한다.
+- `db/reserve-drafts-category.sql`: 예약 이름과 임시저장 정렬 인덱스. 미발행 글·이미지 접근은 기존 RLS를 사용한다.
+- `tests/writing-store.test.mjs`: 반복 저장·발행·실패 보존·동시 수정 검증. `tests/drafts-anonymous.integration.mjs`: 실제 익명 조회·삽입 거부 검증.

@@ -3,7 +3,7 @@ import{categoryNameIssue,categoryVisual,categoryImageHtml,categoryLabel,category
 import{escapeHtml}from'../src/utils.js';
 test('category names preserve Korean names, reject reserved/empty/control/overlong input',()=>{
  assert.equal(categoryNameIssue(' 리눅스 실습 '),null);
- for(const name of ['', ' ', '전체','미분류','줄\n바꿈','가'.repeat(31)])assert.ok(categoryNameIssue(name));
+ for(const name of ['', ' ', '전체','미분류','임시저장','줄\n바꿈','가'.repeat(31)])assert.ok(categoryNameIssue(name));
  assert.equal(categoryNameIssue('가'.repeat(30)),null);assert.equal(categoryLabel(null),'미분류');
 });
 test('image selections admit only the built-in catalog and UUID upload references',()=>{
