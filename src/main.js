@@ -12,12 +12,13 @@ import {escapeHtml as esc, canWrite, memberLabel, fileAllowed,readableError} fro
 import {normalizeUsername,validUsername,registrationIssue} from './account-rules.js';
 import {categoryImageHtml,categoryLabel} from './category-ui.js';
 import {renderBlogSettings} from './blog-settings.js';
+import {checkReadingAccess} from './access-refresh.js';
 import './style.css';
 
 const db=createClient(SUPABASE_URL,SUPABASE_KEY);
 const app=document.querySelector('#app');
 let session=null, profile=null, editor=null, draftId=null, dirty=false, saving=false, renderId=0, objectUrls=[], adminFilter='pending', recoveryMode=false;
-let currentPosts=[];
+let currentPosts=[],viewedPost=null;
 const icons={book:'▤',network:'⌘',security:'◈',code:'〈/〉',note:'✎',arrow:'↗'};
 const date=(v)=>new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v));
 let categories=[],categoryImages=[];
@@ -36,9 +37,9 @@ function shell(content,active='home'){
  app.innerHTML=`<a class="skip" href="#main">본문 바로가기</a><aside class="sidebar"><a class="brand" href="#/" aria-label="배움의 기록 홈"><span class="brand-symbol">b<span>.</span></span><span>배움의 기록<small>LEARNING JOURNAL</small></span></a><div class="sidebar-caption">WORK IN PROGRESS, EVERY DAY</div><nav aria-label="주 메뉴"><button class="nav-item ${active==='home'?'active':''}" data-go="/"><span>▤</span> 모든 기록 <span class="nav-arrow">↗</span></button><div class="nav-label">주제별 기록</div>${[...categories.map(c=>({name:c.name,visual:c})),{name:'미분류',visual:null}].map(c=>`<button class="nav-item category-nav" data-go="/?category=${encodeURIComponent(c.name)}"><span>${categoryImageHtml(c.visual,esc)}</span>${esc(c.name)}</button>`).join('')}${isAdmin()?`<div class="nav-label">관리자 공간</div><button class="nav-item ${active==='write'?'active':''}" data-go="/write"><span>＋</span> 새 기록 작성</button><button class="nav-item ${active==='admin'?'active':''}" data-go="/admin"><span>⚙</span> 회원 관리</button><button class="nav-item ${active==='settings'?'active':''}" data-go="/settings"><span>✎</span> 블로그 수정</button>`:''}</nav><div class="sidebar-bottom"><div class="owner"><span class="owner-mark">JY</span><div><strong>준영의 학습 노트</strong><small>네트워크 · 보안 · 개발</small></div></div>${account}</div></aside><div class="workspace"><header class="topbar"><span>나만의 학습 아카이브 <span class="topbar-slash">/</span> <strong>${{home:'모든 기록',write:'새 기록',admin:'회원 관리',auth:'계정',post:'기록 읽기',settings:'블로그 수정'}[active]||'모든 기록'}</strong></span><span class="topbar-right"><span class="tiny-dot"></span> 조금씩, 꾸준히${isAdmin()?'<button class="button small" data-go="/write">＋ 글쓰기</button>':''}</span></header><main id="main" tabindex="-1">${content}</main><footer><span>배움의 기록 <span class="muted">© 2026</span></span><span>기록은 쌓이고, 배움은 이어집니다.</span></footer></div>`;
  hydrateCategoryImages(renderId);
 }
-async function loadProfile(){if(!session){profile=null;return;}const {data,error}=await db.from('profiles').select('*').eq('id',session.user.id).single();if(error)throw error;profile=data;}
+async function loadProfile(){if(!session){profile=null;return;}const userId=session.user.id;const {data,error}=await db.from('profiles').select('*').eq('id',userId).single();if(error)throw error;if(session?.user.id===userId)profile=data;}
 function stateBanner(){if(!profile||profile.status==='approved')return '';const texts={pending:'가입 신청을 확인하고 있어요. 관리자가 승인하면 비공개 기록도 읽을 수 있습니다.',rejected:'가입 신청이 거절되었습니다. 현재는 공개 기록만 볼 수 있습니다.',expelled:'블랙 처리된 계정입니다. 현재는 공개 기록만 볼 수 있습니다.'};return `<div class="notice"><strong>${esc(memberLabel(profile))}</strong><span>${texts[profile.status]}</span></div>`;}
-async function render(){const my=++renderId;cleanup();dirty=false;const {path,params}=route();
+async function render(){const my=++renderId;cleanup();viewedPost=null;dirty=false;const {path,params}=route();
  try{await loadCategories(my);if(my!==renderId)return;}catch(error){if(my===renderId)shell(statusBox('error','블로그 설정을 불러오지 못했어요.',readableError(error),'<button class="button" data-action="retry">다시 시도</button>'));return;}
  if(recoveryMode||path==='/password'){renderPassword();return;}
  if(path==='/login'||path==='/signup'||path==='/forgot'){renderAuth(path);return;}
@@ -53,11 +54,12 @@ async function render(){const my=++renderId;cleanup();dirty=false;const {path,pa
 }
 function cleanHtml(html){return DOMPurify.sanitize(html,{USE_PROFILES:{html:true},ADD_ATTR:['data-asset','data-type','data-checked','colwidth'],FORBID_TAGS:['iframe','object','embed','form','input','button','video','audio'],FORBID_ATTR:['src','srcset']});}
 async function hydrateImages(container,my,strict=false){for(const image of container.querySelectorAll('img')){image.removeAttribute('src');const asset=image.getAttribute('data-asset');if(!asset||!/^[-a-f0-9]{36}\/[a-zA-Z0-9._-]+$/.test(asset)){image.remove();continue;}const {data,error}=await db.storage.from('blog-images').download(asset);if(my!==renderId)return;if(error){if(strict)throw error;image.replaceWith(Object.assign(document.createElement('span'),{textContent:'이미지를 불러오지 못했습니다.'}));continue;}const url=URL.createObjectURL(data);objectUrls.push(url);image.src=url;image.loading='lazy';}}
-async function renderPost(id,my){shell('<div id="post-detail">'+statusBox('loading','기록을 펼치고 있어요.','잠시만 기다려 주세요.')+'</div>','post');try{let query=db.from('posts').select('*').eq('id',id);if(profile?.status!=='approved')query=query.eq('visibility','public');const {data:p,error}=await query.maybeSingle();if(error)throw error;if(my!==renderId)return;const box=document.querySelector('#post-detail');if(!p){box.innerHTML=statusBox('empty','열람할 수 없는 기록입니다.','글이 없거나 현재 계정에 열람 권한이 없습니다.','<button class="button" data-go="/">기록 목록으로</button>');return;}box.innerHTML=`<article class="article"><button class="text-button back-link" data-go="/">← 모든 기록</button><div class="post-meta"><span class="category-label">${esc(categoryLabel(p.category))}</span><span>${date(p.created_at)}</span>${p.visibility==='private'?'<span class="private-badge">비공개 · 회원 전용</span>':''}</div><h1>${esc(p.title)}</h1>${isAdmin()?`<div class="post-actions"><button class="button" data-go="/edit/${p.id}">글 수정</button><button class="button danger" data-delete-post="${p.id}">글 삭제</button></div>`:''}<div class="article-author"><span class="owner-mark">JY</span><span>준영의 학습 노트</span><span class="muted">· 배움의 기록</span></div><div class="prose" id="article-body"></div><nav class="post-neighbors" id="post-neighbors" aria-label="이전 글과 다음 글"></nav><div class="article-bottom"><span>오늘의 기록이 내일의 밑거름이 되길.</span><button class="button" data-go="/">다른 기록 보기 ↗</button></div></article>`;const body=document.querySelector('#article-body');body.innerHTML=cleanHtml(p.content_html);await Promise.all([hydrateImages(body,my),renderNeighbors(p.id,my)]);}
+async function renderPost(id,my){shell('<div id="post-detail">'+statusBox('loading','기록을 펼치고 있어요.','잠시만 기다려 주세요.')+'</div>','post');try{let query=db.from('posts').select('*').eq('id',id);if(profile?.status!=='approved')query=query.eq('visibility','public');const {data:p,error}=await query.maybeSingle();if(error)throw error;if(my!==renderId)return;const box=document.querySelector('#post-detail');if(!p){box.innerHTML=statusBox('empty','열람할 수 없는 기록입니다.','글이 없거나 현재 계정에 열람 권한이 없습니다.','<button class="button" data-go="/">기록 목록으로</button>');return;}viewedPost={id:p.id,updated_at:p.updated_at,visibility:p.visibility};box.innerHTML=`<article class="article"><button class="text-button back-link" data-go="/">← 모든 기록</button><div class="post-meta"><span class="category-label">${esc(categoryLabel(p.category))}</span><span>${date(p.created_at)}</span>${p.visibility==='private'?'<span class="private-badge">비공개 · 회원 전용</span>':''}</div><h1>${esc(p.title)}</h1>${isAdmin()?`<div class="post-actions"><button class="button" data-go="/edit/${p.id}">글 수정</button><button class="button danger" data-delete-post="${p.id}">글 삭제</button></div>`:''}<div class="article-author"><span class="owner-mark">JY</span><span>준영의 학습 노트</span><span class="muted">· 배움의 기록</span></div><div class="prose" id="article-body"></div><nav class="post-neighbors" id="post-neighbors" aria-label="이전 글과 다음 글"></nav><div class="article-bottom"><span>오늘의 기록이 내일의 밑거름이 되길.</span><button class="button" data-go="/">다른 기록 보기 ↗</button></div></article>`;const body=document.querySelector('#article-body');body.innerHTML=cleanHtml(p.content_html);await Promise.all([hydrateImages(body,my),renderNeighbors(p.id,my)]);}
  catch(error){if(my===renderId)document.querySelector('#post-detail').innerHTML=statusBox('error','기록을 읽지 못했어요.',readableError(error),'<button class="button" data-action="retry">다시 시도</button>');}}
 async function renderNeighbors(id,my){
  const box=document.querySelector('#post-neighbors');
  try{const {data,error}=await db.rpc('get_neighbor_posts',{p_post_id:id,p_public_only:profile?.status!=='approved'});if(error)throw error;if(my!==renderId)return;
+  const snapshot=JSON.stringify(data.map(p=>[p.direction,p.id,p.title]));if(box.dataset.snapshot===snapshot)return;box.dataset.snapshot=snapshot;
   box.innerHTML=['next','previous'].map(direction=>{const post=data.find(p=>p.direction===direction);const label=direction==='previous'?'이전 글':'다음 글';return post?`<a class="neighbor-link ${direction}" href="#/post/${post.id}"><small>${direction==='next'?'← ':''}${label}${direction==='previous'?' →':''}</small><strong>${esc(post.title)}</strong></a>`:`<div class="neighbor-empty"><small>${label}</small><span>${label}이 없습니다.</span></div>`;}).join('');
  }catch{if(my===renderId)box.innerHTML='<div class="neighbor-error" role="status">이전·다음 글을 불러오지 못했어요. <button class="text-button" data-action="retry">다시 시도</button></div>';}
 }
@@ -177,13 +179,25 @@ app.addEventListener('click',async e=>{const target=e.target.closest('button');i
 window.addEventListener('hashchange',()=>render());
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 window.addEventListener('pagehide',clearUrls);
-db.auth.onAuthStateChange((event,next)=>{session=next;if(event==='PASSWORD_RECOVERY'){recoveryMode=true;setTimeout(()=>render(),0);}if(event==='SIGNED_OUT'){profile=null;currentPosts=[];setTimeout(()=>render(),0);}if(event==='TOKEN_REFRESHED'){setTimeout(async()=>{try{await loadProfile();if(!dirty)render();}catch{profile=null;if(!dirty)render();}},0);}});
+db.auth.onAuthStateChange((event,next)=>{session=next;if(event==='PASSWORD_RECOVERY'){recoveryMode=true;setTimeout(()=>render(),0);}if(event==='SIGNED_OUT'){profile=null;currentPosts=[];setTimeout(()=>render(),0);}if(event==='TOKEN_REFRESHED'){setTimeout(()=>refreshAccess(),0);}});
 let refreshingAccess=false;
 async function refreshAccess(){
  if(!session||dirty||saving||refreshingAccess||document.hidden)return;
  refreshingAccess=true;
- try{const previous=profile?.status;await loadProfile();if(previous!==profile.status||route().path.startsWith('/post/'))await render();}
- catch{profile=null;currentPosts=[];clearUrls();await render();}
+ const generation=renderId,before=profile,post=viewedPost;
+ try{
+  await loadProfile();if(generation!==renderId||dirty||saving||!session)return;
+  const result=await checkReadingAccess({before,after:profile,post,readPost:(id,publicOnly)=>{let query=db.from('posts').select('id,updated_at,visibility').eq('id',id);if(publicOnly)query=query.eq('visibility','public');return query.maybeSingle();}});
+  if(generation!==renderId||dirty||saving||!session)return;
+  if(result.action==='redraw'){await render();return;}
+  if(result.action==='changed'){
+   viewedPost=result.post;
+   const meta=document.querySelector('.article>.post-meta');
+   if(meta){meta.querySelector('.private-badge')?.remove();if(result.post.visibility==='private'){const badge=document.createElement('span');badge.className='private-badge';badge.textContent='비공개 · 회원 전용';meta.append(badge);}}
+   toast('이 기록이 변경되었습니다. 최신 내용은 새로고침해서 확인해 주세요.');
+  }
+  if(post)await renderNeighbors(post.id,generation);
+ }catch{if(generation===renderId&&!dirty&&!saving){profile=null;currentPosts=[];clearUrls();await render();}}
  finally{refreshingAccess=false;}
 }
 window.addEventListener('focus',refreshAccess);
