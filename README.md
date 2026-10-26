@@ -61,3 +61,5 @@ npm run dev
 - 이미 발행된 글의 수정은 기존 수정 내용 저장을 이용한다.
 - `db/reserve-drafts-category.sql`: 예약 이름과 임시저장 정렬 인덱스. 미발행 글·이미지 접근은 기존 RLS를 사용한다.
 - `tests/writing-store.test.mjs`: 반복 저장·발행·실패 보존·동시 수정 검증. `tests/drafts-anonymous.integration.mjs`: 실제 익명 조회·삽입 거부 검증.
+
+- 임시저장 목록의 **임시저장 삭제**로 필요 없는 글을 지운다. 복구 불가 확인 후 삭제하며 첨부 이미지도 정리한다. 다른 창에서 수정·게시된 글은 목록을 다시 확인해야 삭제할 수 있다.

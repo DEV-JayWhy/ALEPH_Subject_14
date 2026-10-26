@@ -13,7 +13,7 @@ import {normalizeUsername,validUsername,registrationIssue} from './account-rules
 import {categoryImageHtml,categoryLabel} from './category-ui.js';
 import {renderBlogSettings} from './blog-settings.js';
 import {checkReadingAccess} from './access-refresh.js';
-import {storeWriting} from './writing-store.js';
+import {storeWriting,deleteStoredDraft} from './writing-store.js';
 import './style.css';
 
 const db=createClient(SUPABASE_URL,SUPABASE_KEY);
@@ -99,7 +99,7 @@ async function renderDrafts(my){
  if(!isAdmin()){shell(statusBox('error','관리자 전용 화면입니다.','임시저장 기록은 관리자만 볼 수 있습니다.','<button class="button" data-go="/">기록 목록으로</button>'),'drafts');return;}
  shell(`<section class="drafts-page"><div class="section-top"><div><span class="eyebrow">DRAFTS · ADMIN ONLY</span><h1>임시저장</h1><p class="page-description">아직 마무리하지 않은 기록이에요. 관리자만 볼 수 있고, 이어 작성한 뒤 기록 저장을 누르면 이 목록에서 사라집니다.</p></div><button class="button primary" data-go="/write">＋ 새 기록 작성</button></div><div id="draft-list">${statusBox('loading','임시저장 기록을 불러오고 있어요.','잠시만 기다려 주세요.')}</div></section>`,'drafts');
  try{const {data,error}=await db.from('posts').select('id,title,excerpt,category,updated_at,visibility').eq('is_published',false).order('updated_at',{ascending:false}).order('id').limit(100);if(error)throw error;if(my!==renderId)return;
-  document.querySelector('#draft-list').innerHTML=data.length?data.map(p=>`<article class="draft-card"><div><span class="private-badge">관리자 전용 · 임시저장</span><h2>${esc(p.title)}</h2><p>${esc(p.excerpt||'이어서 내용을 작성해 보세요.')}</p><small>${esc(categoryLabel(p.category))} · ${date(p.updated_at)} 저장</small></div><button class="button primary" data-go="/edit/${p.id}">이어 작성 ↗</button></article>`).join(''):statusBox('empty','임시저장 기록이 없어요.','글쓰기 화면에서 임시 저장을 누르면 여기에 보관됩니다.','<button class="button" data-go="/write">글쓰기</button>');
+  document.querySelector('#draft-list').innerHTML=data.length?data.map(p=>`<article class="draft-card"><div><span class="private-badge">관리자 전용 · 임시저장</span><h2>${esc(p.title)}</h2><p>${esc(p.excerpt||'이어서 내용을 작성해 보세요.')}</p><small>${esc(categoryLabel(p.category))} · ${date(p.updated_at)} 저장</small></div><div class="draft-actions"><button class="button primary" data-go="/edit/${p.id}">이어 작성 ↗</button><button class="button danger" data-delete-draft="${p.id}" data-updated-at="${esc(p.updated_at)}">임시저장 삭제</button></div></article>`).join(''):statusBox('empty','임시저장 기록이 없어요.','글쓰기 화면에서 임시 저장을 누르면 여기에 보관됩니다.','<button class="button" data-go="/write">글쓰기</button>');
  }catch(error){if(my===renderId)document.querySelector('#draft-list').innerHTML=statusBox('error','임시저장 기록을 불러오지 못했어요.',readableError(error),'<button class="button" data-action="retry">다시 시도</button>');}
 }
 
@@ -171,21 +171,21 @@ async function saveWriting(e,publish){
   toast(wasPublished?'기록을 수정했습니다.':'기록을 저장했습니다.');postBusy(false);go('/post/'+id);
  }catch(error){if(my===renderId)message.textContent=readableError(error);}finally{if(my===renderId)postBusy(false);else saving=false;}
 }
-async function deletePost(id,button){
- if(!isAdmin()||saving||!confirm('이 기록을 삭제할까요? 삭제한 글은 복구할 수 없습니다.'))return;
+async function deletePost(id,button,draft=false){
+ if(!isAdmin()||saving||!confirm(draft?'이 임시저장을 삭제할까요? 작성 내용과 첨부 이미지는 복구할 수 없습니다.':'이 기록을 삭제할까요? 삭제한 글은 복구할 수 없습니다.'))return;
  button.disabled=true;saving=true;
  try{
   await loadProfile();if(!isAdmin())throw Error('permission denied');
-  const {data,error}=await db.from('posts').delete().eq('id',id).select('id');if(error)throw error;if(!data?.length)throw Error('permission denied');
+  if(draft)await deleteStoredDraft({db,id,updatedAt:button.dataset.updatedAt});else{const {data,error}=await db.from('posts').delete().eq('id',id).select('id');if(error)throw error;if(!data?.length)throw Error('permission denied');}
   // Removing the row immediately denies member/anonymous access to its images.
   // Cleanup can be retried later if Storage is temporarily unavailable.
   let cleanupFailed=false;
   for(;;){const result=await db.storage.from('blog-images').list(id,{limit:100});if(result.error){cleanupFailed=true;break;}if(!result.data.length)break;const removed=await db.storage.from('blog-images').remove(result.data.map(file=>id+'/'+file.name));if(removed.error){cleanupFailed=true;break;}}
-  currentPosts=[];clearUrls();toast(cleanupFailed?'글은 삭제했습니다. 첨부 파일 정리는 다시 확인해야 합니다.':'기록을 삭제했습니다.');saving=false;go('/');
+  currentPosts=[];clearUrls();toast(cleanupFailed?'글은 삭제했습니다. 첨부 파일 정리는 다시 확인해야 합니다.':draft?'임시저장을 삭제했습니다.':'기록을 삭제했습니다.');saving=false;if(draft)await render();else go('/');
  }catch(error){toast(readableError(error));button.disabled=false;}finally{saving=false;}
 }
 
-app.addEventListener('click',async e=>{const target=e.target.closest('button');if(!target)return;if(target.dataset.go){go(target.dataset.go);return;}if(target.dataset.deletePost){await deletePost(target.dataset.deletePost,target);return;}if(target.dataset.editor){editorAction(target.dataset.editor);return;}if(target.dataset.members){adminFilter=target.dataset.members;render();return;}if(target.dataset.review){const status=target.dataset.status;if(!['approved','rejected','expelled','pending'].includes(status)||!isAdmin())return;const action=status==='approved'?'수락':status==='rejected'?'거절':status==='expelled'?'블랙 처리':'블랙 해제';const question=status==='expelled'?'이 회원을 블랙 처리할까요? 비공개 글 접근, 로그인, 재가입 신청이 차단됩니다.':status==='pending'?'블랙을 해제할까요? 승인 대기로 이동하며, 다시 수락해야 비공개 기록을 볼 수 있습니다.':`이 가입 신청을 ${action}할까요?`;if(!confirm(question))return;target.disabled=true;try{const {data,error}=await db.from('profiles').update({status:target.dataset.status,reviewed_at:status==='pending'?null:new Date().toISOString()}).eq('id',target.dataset.review).eq('role','member').eq('status',status==='expelled'?'approved':status==='pending'?'expelled':'pending').select('id');if(error)throw error;if(!data.length)throw Error('permission denied');toast(status==='expelled'?'블랙 처리했습니다.':status==='pending'?'블랙을 해제했습니다. 승인 대기에서 다시 수락해 주세요.':`가입 신청을 ${action}했습니다.`);render();}catch(error){toast(readableError(error));target.disabled=false;}return;}if(target.dataset.action==='retry'){render();return;}if(target.dataset.action==='logout'){if(dirty&&!confirm('저장하지 않은 내용을 버리고 로그아웃할까요?'))return;if(saving){toast('저장 또는 업로드가 끝난 후 로그아웃해 주세요.');return;}dirty=false;profile=null;session=null;currentPosts=[];cleanup();shell(statusBox('loading','로그아웃 중입니다.','잠시만 기다려 주세요.'));const {error}=await db.auth.signOut({scope:'local'});location.hash='/';await render();if(error)toast('로그아웃 처리에 실패했습니다. 다시 시도해 주세요.');else toast('로그아웃했습니다.');}});
+app.addEventListener('click',async e=>{const target=e.target.closest('button');if(!target)return;if(target.dataset.go){go(target.dataset.go);return;}if(target.dataset.deleteDraft){await deletePost(target.dataset.deleteDraft,target,true);return;}if(target.dataset.deletePost){await deletePost(target.dataset.deletePost,target);return;}if(target.dataset.editor){editorAction(target.dataset.editor);return;}if(target.dataset.members){adminFilter=target.dataset.members;render();return;}if(target.dataset.review){const status=target.dataset.status;if(!['approved','rejected','expelled','pending'].includes(status)||!isAdmin())return;const action=status==='approved'?'수락':status==='rejected'?'거절':status==='expelled'?'블랙 처리':'블랙 해제';const question=status==='expelled'?'이 회원을 블랙 처리할까요? 비공개 글 접근, 로그인, 재가입 신청이 차단됩니다.':status==='pending'?'블랙을 해제할까요? 승인 대기로 이동하며, 다시 수락해야 비공개 기록을 볼 수 있습니다.':`이 가입 신청을 ${action}할까요?`;if(!confirm(question))return;target.disabled=true;try{const {data,error}=await db.from('profiles').update({status:target.dataset.status,reviewed_at:status==='pending'?null:new Date().toISOString()}).eq('id',target.dataset.review).eq('role','member').eq('status',status==='expelled'?'approved':status==='pending'?'expelled':'pending').select('id');if(error)throw error;if(!data.length)throw Error('permission denied');toast(status==='expelled'?'블랙 처리했습니다.':status==='pending'?'블랙을 해제했습니다. 승인 대기에서 다시 수락해 주세요.':`가입 신청을 ${action}했습니다.`);render();}catch(error){toast(readableError(error));target.disabled=false;}return;}if(target.dataset.action==='retry'){render();return;}if(target.dataset.action==='logout'){if(dirty&&!confirm('저장하지 않은 내용을 버리고 로그아웃할까요?'))return;if(saving){toast('저장 또는 업로드가 끝난 후 로그아웃해 주세요.');return;}dirty=false;profile=null;session=null;currentPosts=[];cleanup();shell(statusBox('loading','로그아웃 중입니다.','잠시만 기다려 주세요.'));const {error}=await db.auth.signOut({scope:'local'});location.hash='/';await render();if(error)toast('로그아웃 처리에 실패했습니다. 다시 시도해 주세요.');else toast('로그아웃했습니다.');}});
 window.addEventListener('hashchange',()=>render());
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 window.addEventListener('pagehide',clearUrls);

@@ -10,3 +10,10 @@ export async function storeWriting({db,id,authorId,previous,values,publish}){
  if(!data){const error=new Error('writing conflict');error.publicMessage=conflictMessage;throw error;}
  return data;
 }
+
+export async function deleteStoredDraft({db,id,updatedAt}){
+ const {data,error}=await db.from('posts').delete().eq('id',id).eq('is_published',false).eq('updated_at',updatedAt).select('id').maybeSingle();
+ if(error)throw error;
+ if(!data){const error=new Error('draft delete conflict');error.publicMessage=conflictMessage;throw error;}
+ return data;
+}
