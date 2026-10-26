@@ -87,3 +87,9 @@
 - 모바일 점검은 사용자 요청으로 보류했다.
 
 보안 점검 참고: https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy · https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+
+
+## v9 최종 단계 — 2026-10-26
+
+- 사용자 확인: 카테고리 관리, 수정·삭제 성공. 이미지 등록·삭제된 분류의 글 보존은 별도 추가 확인을 완료했다고 해석하지 않음.
+- 요청대로 다음 글(왼쪽, ←), 이전 글(오른쪽, →)으로 배치 변경. 모바일 단일 열에서도 다음 글이 먼저 표시됨. 서버의 이웃 글 선택과 권한 검사는 변경하지 않음.

@@ -58,7 +58,7 @@ async function renderPost(id,my){shell('<div id="post-detail">'+statusBox('loadi
 async function renderNeighbors(id,my){
  const box=document.querySelector('#post-neighbors');
  try{const {data,error}=await db.rpc('get_neighbor_posts',{p_post_id:id,p_public_only:profile?.status!=='approved'});if(error)throw error;if(my!==renderId)return;
-  box.innerHTML=['previous','next'].map(direction=>{const post=data.find(p=>p.direction===direction);const label=direction==='previous'?'이전 글':'다음 글';return post?`<a class="neighbor-link ${direction}" href="#/post/${post.id}"><small>${direction==='previous'?'← ':''}${label}${direction==='next'?' →':''}</small><strong>${esc(post.title)}</strong></a>`:`<div class="neighbor-empty"><small>${label}</small><span>${label}이 없습니다.</span></div>`;}).join('');
+  box.innerHTML=['next','previous'].map(direction=>{const post=data.find(p=>p.direction===direction);const label=direction==='previous'?'이전 글':'다음 글';return post?`<a class="neighbor-link ${direction}" href="#/post/${post.id}"><small>${direction==='next'?'← ':''}${label}${direction==='previous'?' →':''}</small><strong>${esc(post.title)}</strong></a>`:`<div class="neighbor-empty"><small>${label}</small><span>${label}이 없습니다.</span></div>`;}).join('');
  }catch{if(my===renderId)box.innerHTML='<div class="neighbor-error" role="status">이전·다음 글을 불러오지 못했어요. <button class="text-button" data-action="retry">다시 시도</button></div>';}
 }
 async function accountRequest(body){
